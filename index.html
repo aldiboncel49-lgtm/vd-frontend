@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Video Downloader</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#0f1117;color:#e4e6f0;min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:40px 20px}
+.card{background:#1a1d27;border:1px solid #2e3348;border-radius:16px;padding:32px;width:100%;max-width:560px}
+h1{font-size:22px;margin-bottom:4px}
+.sub{color:#8b8fa8;font-size:13px;margin-bottom:24px}
+label{display:block;font-size:12px;font-weight:600;color:#8b8fa8;margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px}
+input,select{width:100%;padding:12px 16px;background:#242836;border:1px solid #2e3348;border-radius:8px;color:#e4e6f0;font-size:15px;outline:none;transition:border-color .2s;margin-bottom:16px}
+input:focus,select:focus{border-color:#6c8cff}
+.row{display:flex;gap:12px}
+.row>div{flex:1}
+.btn{width:100%;padding:14px;background:#6c8cff;color:#fff;border:none;border-radius:8px;font-size:15px;font-weight:600;cursor:pointer;transition:opacity .2s;margin-top:8px}
+.btn:hover{opacity:.85}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+#log{margin-top:20px;padding:16px;background:#0f1117;border:1px solid #2e3348;border-radius:8px;font-family:monospace;font-size:13px;max-height:300px;overflow-y:auto;white-space:pre-wrap;display:none}
+#log.show{display:block}
+.status{margin-top:12px;padding:10px 16px;border-radius:8px;font-size:13px;display:none}
+.status.show{display:block}
+.ok{background:rgba(82,196,26,.15);color:#52c41a}
+.err{background:rgba(255,77,79,.15);color:#ff4d4f}
+.info{background:rgba(108,140,255,.15);color:#6c8cff}
+.config{margin-bottom:20px;padding:12px;background:#242836;border-radius:8px;font-size:13px}
+.config label{margin-bottom:4px}
+.config input{margin-bottom:0;font-size:13px;padding:8px 12px}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>Video Downloader</h1>
+  <p class="sub">YouTube · TikTok · Twitter/X</p>
+
+  <div class="config">
+    <label>API Server URL</label>
+    <input type="url" id="apiUrl" placeholder="https://your-server.example.com" value="">
+    <p style="color:#8b8fa8;font-size:11px;margin-top:4px">Set this to your server's public URL (tunnel or IP:3002)</p>
+  </div>
+
+  <label>Video URL</label>
+  <input type="url" id="url" placeholder="Paste video URL here..." autocomplete="off">
+
+  <div class="row">
+    <div>
+      <label>Quality</label>
+      <select id="quality">
+        <option value="best">Best</option>
+        <option value="1080p">1080p</option>
+        <option value="720p">720p</option>
+        <option value="480p">480p</option>
+        <option value="audio">Audio (mp3)</option>
+      </select>
+    </div>
+    <div>
+      <label>Platform</label>
+      <select id="platform">
+        <option value="auto">Auto-detect</option>
+        <option value="youtube">YouTube</option>
+        <option value="tiktok">TikTok</option>
+        <option value="twitter">Twitter/X</option>
+      </select>
+    </div>
+  </div>
+
+  <button class="btn" id="dlBtn" onclick="startDownload()">Download</button>
+
+  <div id="status" class="status"></div>
+  <div id="log"></div>
+</div>
+
+<script>
+// Load saved API URL
+const savedUrl = localStorage.getItem('vd_api_url');
+if (savedUrl) document.getElementById('apiUrl').value = savedUrl;
+
+const btn = document.getElementById('dlBtn');
+const urlInput = document.getElementById('url');
+const apiUrlInput = document.getElementById('apiUrl');
+const quality = document.getElementById('quality');
+const platform = document.getElementById('platform');
+const statusDiv = document.getElementById('status');
+const logDiv = document.getElementById('log');
+
+urlInput.addEventListener('keydown', e => { if(e.key==='Enter') startDownload(); });
+
+function getApiUrl() {
+  let u = apiUrlInput.value.trim();
+  if (!u) return '';
+  localStorage.setItem('vd_api_url', u);
+  return u.replace(/\/$/, '');
+}
+
+async function startDownload() {
+  const url = urlInput.value.trim();
+  const apiUrl = getApiUrl();
+
+  if (!apiUrl) { showStatus('Set API Server URL first', 'err'); return; }
+  if (!url) { showStatus('Paste a URL first', 'err'); return; }
+  if (!url.startsWith('http')) { showStatus('URL must start with http/https', 'err'); return; }
+
+  btn.disabled = true;
+  btn.textContent = 'Downloading...';
+  logDiv.className = showStatus('Connecting...', 'info');
+
+  try {
+    const ctrl = new AbortController();
+    setTimeout(() => ctrl.abort(), 660000); // 11 min timeout
+
+    const res = await fetch(apiUrl + '/api/download', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        url: url,
+        quality: quality.value,
+        platform: platform.value,
+      }),
+      signal: ctrl.signal,
+    });
+    const data = await res.json();
+
+    if (data.error) {
+      showStatus(data.error, 'err');
+    } else {
+      showStatus(data.message || 'Done!', 'ok');
+      if (data.dir) showStatus(data.message + ' Saved to: ' + data.dir, 'ok');
+    }
+    if (data.output) { logDiv.className = 'show'; logDiv.textContent = data.output; }
+  } catch (e) {
+    if (e.name === 'AbortError') {
+      showStatus('Timed out. Video may still be downloading on server.', 'err');
+    } else {
+      showStatus('Connection error: Check API URL and server status', 'err');
+    }
+  }
+
+  btn.disabled = false;
+  btn.textContent = 'Download';
+}
+
+function showStatus(msg, type) {
+  statusDiv.className = 'show ' + type;
+  statusDiv.textContent = msg;
+}
+</script>
+</body>
+</html>
