@@ -18,6 +18,7 @@ input:focus,select:focus{border-color:#6c8cff}
 .btn{width:100%;padding:14px;background:#6c8cff;color:#fff;border:none;border-radius:8px;font-size:15px;font-weight:600;cursor:pointer;transition:opacity .2s;margin-top:8px}
 .btn:hover{opacity:.85}
 .btn:disabled{opacity:.5;cursor:not-allowed}
+.btn-sec{background:#2e3348;margin-top:8px}
 #log{margin-top:20px;padding:16px;background:#0f1117;border:1px solid #2e3348;border-radius:8px;font-family:monospace;font-size:13px;max-height:300px;overflow-y:auto;white-space:pre-wrap;display:none}
 #log.show{display:block}
 .status{margin-top:12px;padding:10px 16px;border-radius:8px;font-size:13px;display:none}
@@ -28,6 +29,7 @@ input:focus,select:focus{border-color:#6c8cff}
 .config{margin-bottom:20px;padding:12px;background:#242836;border-radius:8px;font-size:13px}
 .config label{margin-bottom:4px}
 .config input{margin-bottom:0;font-size:13px;padding:8px 12px}
+.cookie-status{font-size:11px;color:#8b8fa8;margin-top:4px}
 </style>
 </head>
 <body>
@@ -39,6 +41,13 @@ input:focus,select:focus{border-color:#6c8cff}
     <label>API Server URL</label>
     <input type="url" id="apiUrl" placeholder="https://your-server.example.com" value="">
     <p style="color:#8b8fa8;font-size:11px;margin-top:4px">Set this to your server's public URL (tunnel or IP:3002)</p>
+  </div>
+
+  <div class="config">
+    <label>Upload Cookies (optional)</label>
+    <input type="file" id="cookiesFile" accept=".txt">
+    <p class="cookie-status" id="cookieStatus">No cookies uploaded. Needed for age-restricted/private videos.</p>
+    <button class="btn btn-sec" onclick="uploadCookies()">Upload Cookies</button>
   </div>
 
   <label>Video URL</label>
@@ -73,7 +82,6 @@ input:focus,select:focus{border-color:#6c8cff}
 </div>
 
 <script>
-// Load saved API URL
 const savedUrl = localStorage.getItem('vd_api_url');
 if (savedUrl) document.getElementById('apiUrl').value = savedUrl;
 
@@ -84,6 +92,7 @@ const quality = document.getElementById('quality');
 const platform = document.getElementById('platform');
 const statusDiv = document.getElementById('status');
 const logDiv = document.getElementById('log');
+let cookiesUploaded = false;
 
 urlInput.addEventListener('keydown', e => { if(e.key==='Enter') startDownload(); });
 
@@ -92,6 +101,32 @@ function getApiUrl() {
   if (!u) return '';
   localStorage.setItem('vd_api_url', u);
   return u.replace(/\/$/, '');
+}
+
+async function uploadCookies() {
+  const apiUrl = getApiUrl();
+  if (!apiUrl) { showStatus('Set API Server URL first', 'err'); return; }
+  const file = document.getElementById('cookiesFile').files[0];
+  if (!file) { showStatus('Select a cookies file first', 'err'); return; }
+
+  const text = await file.text();
+  try {
+    const res = await fetch(apiUrl + '/api/cookies', {
+      method: 'POST',
+      headers: {'Content-Type': 'text/plain'},
+      body: text,
+    });
+    const data = await res.json();
+    if (data.ok) {
+      cookiesUploaded = true;
+      document.getElementById('cookieStatus').textContent = 'Cookies uploaded: ' + data.platform;
+      showStatus('Cookies uploaded successfully', 'ok');
+    } else {
+      showStatus(data.error || 'Failed to upload cookies', 'err');
+    }
+  } catch (e) {
+    showStatus('Upload error: ' + e.message, 'err');
+  }
 }
 
 async function startDownload() {
@@ -104,29 +139,33 @@ async function startDownload() {
 
   btn.disabled = true;
   btn.textContent = 'Downloading...';
-  logDiv.className = showStatus('Connecting...', 'info');
+  logDiv.className = 'show';
+  logDiv.textContent = '';
+  showStatus('Starting download...', 'info');
 
   try {
     const ctrl = new AbortController();
-    setTimeout(() => ctrl.abort(), 660000); // 11 min timeout
+    setTimeout(() => ctrl.abort(), 660000);
+
+    const body = {
+      url: url,
+      quality: quality.value,
+      platform: platform.value,
+      use_cookies: cookiesUploaded,
+    };
 
     const res = await fetch(apiUrl + '/api/download', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({
-        url: url,
-        quality: quality.value,
-        platform: platform.value,
-      }),
+      body: JSON.stringify(body),
       signal: ctrl.signal,
     });
     const data = await res.json();
 
     if (data.error) {
-      showStatus(data.error, 'err');
+      showStatus('Error: ' + data.error, 'err');
     } else {
       showStatus(data.message || 'Done!', 'ok');
-      if (data.dir) showStatus(data.message + ' Saved to: ' + data.dir, 'ok');
     }
     if (data.output) { logDiv.className = 'show'; logDiv.textContent = data.output; }
   } catch (e) {
